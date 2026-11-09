@@ -2,13 +2,14 @@
   "VarietyExtraOrganizer": {
     "name": "综艺加更整理",
     "description": "扫描综艺源目录，将 MoviePilot 无法识别的加更(Extra/Plus)文件硬链接到媒体库并规范命名，使飞牛/Emby 能正常刮削。源文件全程不动。",
-    "version": "1.2.4",
+    "version": "1.2.5",
     "author": "T1677",
     "level": 1,
     "icon": "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png",
     "labels": "文件整理,综艺",
     "system_version": ">=3.0.0",
     "history": {
+      "v1.2.5": "屏蔽词检查用双样例匹配，锚定正则不再误报；并发标志 2 小时自愈",
       "v1.2.4": "修正 .PlusXX 误判；缺 SxxEyy 时按顺序编号避免第 00 集；同季只统计一次",
       "v1.2.3": "详情页与日志增加 NFO 覆盖统计（库内覆盖 N/M）；「库内加更」统计排除 nfo/字幕/图片",
       "v1.2.2": "NFO 结构对齐飞牛自带格式：seasonnumber/episodenumber、premiered/releasedate/aired/year，不写 plot",

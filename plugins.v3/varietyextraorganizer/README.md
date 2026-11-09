@@ -354,6 +354,7 @@ PLUGIN_MARKET=https://github.com/jxxghp/MoviePilot-Plugins,https://github.com/13
 
 | 版本 | 说明 |
 |---|---|
+| v1.2.5 | 屏蔽词检查改用「纯词 + 样例名」双样例匹配（`^加更` 这类锚定写法不再误报）；并发标志超过 2 小时自动失效，避免异常后永久跳过 |
 | v1.2.4 | 修正 `.PlusXX` 被误判为加更文件；文件名缺 `SxxEyy` 时按顺序编号（不再出现「第 00 集加更」）；同一目标季被多个源目录命中时只统计一次 |
 | v1.2.3 | 详情页与日志增加 NFO 覆盖统计（`库内覆盖 N/M`）；「库内加更」不再把 nfo/字幕/图片算成视频 |
 | v1.2.2 | NFO 结构对齐飞牛自带格式（`seasonnumber`/`episodenumber` + `premiered`/`releasedate`/`aired`/`year`），不再写 `plot`；内容有变化才重写 |

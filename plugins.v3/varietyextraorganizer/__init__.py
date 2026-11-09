@@ -36,7 +36,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.2.4"
+    plugin_version = "1.2.5"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -62,6 +62,7 @@ class VarietyExtraOrganizer(_PluginBase):
     _totals: Dict[str, int] = {}  # 累计统计：runs/linked/errors
     _state_loaded = False
     _running = False  # 防止定时与手动触发并发
+    _run_started = 0.0  # 本轮开始时间，用于识别卡死的标志
 
     def __init__(self):
         super().__init__()
@@ -71,6 +72,7 @@ class VarietyExtraOrganizer(_PluginBase):
         self._totals = {}
         self._state_loaded = False
         self._running = False
+        self._run_started = 0.0
 
     def init_plugin(self, config: dict = None):
         self._ensure_state()
@@ -503,6 +505,8 @@ class VarietyExtraOrganizer(_PluginBase):
             return False, f"读取屏蔽词失败：{e}"
         if isinstance(rules, str):
             rules = rules.splitlines()
+        # 用「纯词 + 真实样例名」两段文本试匹配，兼容 ^加更 / 加更\.mkv$ 这类锚定写法
+        samples = ("加更", self._SAMPLE_NAME)
         for rule in rules:
             if not isinstance(rule, str):
                 continue
@@ -510,8 +514,7 @@ class VarietyExtraOrganizer(_PluginBase):
             if not pattern or pattern.startswith("#"):
                 continue
             try:
-                # 屏蔽词是正则，用真实样例名试匹配
-                if re.search(pattern, self._SAMPLE_NAME):
+                if any(re.search(pattern, text) for text in samples):
                     return True, ""
             except re.error:
                 # 非法正则跳过，不影响其它规则
@@ -644,10 +647,12 @@ class VarietyExtraOrganizer(_PluginBase):
 
     def __organize(self):
         """执行加更整理"""
-        if self._running:
+        # 超过 2 小时视为上一次异常退出遗留的标志，自愈后继续
+        if self._running and time.time() - self._run_started < 7200:
             self._add_log("warning", "上一轮扫描还没结束，本次触发已跳过")
             return
         self._running = True
+        self._run_started = time.time()
         started = time.time()
         stats: Dict[str, Any] = {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
