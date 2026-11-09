@@ -35,7 +35,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot/main/app.ico"
     # 插件版本
-    plugin_version = "1.1.2"
+    plugin_version = "1.1.3"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -282,20 +282,43 @@ class VarietyExtraOrganizer(_PluginBase):
             }],
         }
 
-        log_items: List[dict] = [
-            {
-                "component": "VCardText",
-                "props": {"class": "text-caption py-1"},
-                "text": line,
-            }
-            for line in list(self._logs)[-12:][::-1]
-        ]
-        if not log_items:
+        shown = list(self._logs)[-20:][::-1]
+        if shown:
+            log_items: List[dict] = [
+                {
+                    "component": "div",
+                    "props": {
+                        "class": "text-caption py-1",
+                        "style": "white-space: pre-wrap; word-break: break-all;",
+                    },
+                    "text": line,
+                }
+                for line in shown
+            ]
+            log_hint = f"最近 {len(shown)} 条，框内可滚动 · 完整记录见 MoviePilot 主日志"
+        else:
             log_items = [{
-                "component": "VCardText",
+                "component": "div",
                 "props": {"class": "text-caption py-2"},
                 "text": "暂无运行记录。到「配置」页勾选「立即运行一次」并保存，跑完这里就会有结果。",
             }]
+            log_hint = ""
+
+        log_card: List[dict] = [
+            {"component": "VCardTitle", "props": {"class": "text-subtitle-1 pb-0"}, "text": "运行日志"},
+        ]
+        if log_hint:
+            log_card.append({
+                "component": "VCardText",
+                "props": {"class": "text-caption text-medium-emphasis py-1"},
+                "text": log_hint,
+            })
+        log_card.append({
+            "component": "div",
+            # 固定高度 + 内部滚动，避免日志把详情页撑长
+            "props": {"style": "max-height: 260px; overflow-y: auto; padding: 4px 16px 12px;"},
+            "content": log_items,
+        })
 
         log_row = {
             "component": "VRow",
@@ -305,10 +328,7 @@ class VarietyExtraOrganizer(_PluginBase):
                 "content": [{
                     "component": "VCard",
                     "props": {"variant": "outlined"},
-                    "content": [
-                        {"component": "VCardTitle", "props": {"class": "text-subtitle-1"}, "text": "运行日志"},
-                        *log_items,
-                    ],
+                    "content": log_card,
                 }],
             }],
         }
