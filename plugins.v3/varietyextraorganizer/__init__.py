@@ -35,7 +35,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.1.5"
+    plugin_version = "1.1.6"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -239,11 +239,11 @@ class VarietyExtraOrganizer(_PluginBase):
         last = self._last_run or {}
 
         if not self._src_dir or not self._dst_dir:
-            state_color, state_text = "warning", "未配置目录"
+            state_class, state_text = "text-h6 text-warning", "未配置目录"
         elif not self._enabled:
-            state_color, state_text = "info", "已配置 · 未启用"
+            state_class, state_text = "text-h6 text-medium-emphasis", "已配置 · 未启用"
         else:
-            state_color, state_text = "success", "运行中"
+            state_class, state_text = "text-h6 text-success", "运行中"
 
         total_linked = int(self._totals.get("linked", 0))
         total_errors = int(self._totals.get("errors", 0))
@@ -252,25 +252,23 @@ class VarietyExtraOrganizer(_PluginBase):
         stats_row = {
             "component": "VRow",
             "content": [
-                self._stat_card("状态", state_text, state_color),
+                self._stat_card("状态", state_text, state_class),
                 self._stat_card(
                     "上次运行",
                     last.get("time") or "从未运行",
-                    "primary",
+                    "text-subtitle-1",
                     sub=(f"用时 {last.get('seconds', 0)}s · {last.get('seasons', 0)} 个季目录"
                          if last else ""),
                 ),
                 self._stat_card(
                     "上次新增",
                     f"{last.get('linked', 0)} 个",
-                    "info",
-                    sub=f"跳过 {last.get('skipped', 0)} · 失败 {last.get('errors', 0)}",
+                    sub=(f"跳过 {last.get('skipped', 0)} · 失败 {last.get('errors', 0)}"),
                 ),
                 self._stat_card(
-                    "累计",
-                    f"{total_linked} 个链接",
-                    "success" if total_linked else "grey",
-                    sub=f"失败 {total_errors} · 运行 {total_runs} 次",
+                    "库内加更",
+                    f"{last.get('in_library', 0)} 个",
+                    sub=f"累计新增 {total_linked} · 失败 {total_errors} · 运行 {total_runs} 次",
                 ),
             ],
         }
@@ -285,6 +283,7 @@ class VarietyExtraOrganizer(_PluginBase):
                     "props": {
                         "type": "success" if blocked else "warning",
                         "variant": "tonal",
+                        "density": "compact",
                         "title": "屏蔽词已配置" if blocked else "前置条件未满足：缺少屏蔽词「加更」",
                         "text": (
                             "「右上角『捷径』→ 词表 → 文件整理屏蔽词」里已有能命中加更文件的规则，"
@@ -356,17 +355,19 @@ class VarietyExtraOrganizer(_PluginBase):
                 "component": "VCol",
                 "props": {"cols": 12},
                 "content": [{
-                    "component": "VAlert",
-                    "props": {
-                        "type": "info",
-                        "variant": "tonal",
-                        "title": "命名规则",
-                        "text": (
-                            "输出：剧名 - SxxEyy - 第 ZZ 集加更.ext。"
-                            "yy = 该季已有正片最大集号 + 序号（排在季末），ZZ = 源文件期号 × 2。"
-                            "源文件只读不写，删除媒体库里的链接不会影响源文件。"
-                        ),
-                    },
+                    "component": "VCard",
+                    "props": {"variant": "outlined"},
+                    "content": [{
+                        "component": "VCardText",
+                        "props": {"class": "text-caption text-medium-emphasis"},
+                        "content": [
+                            {"component": "div", "props": {"class": "text-subtitle-2 mb-2"}, "text": "命名规则"},
+                            {"component": "div", "text": "剧名 - SxxEyy - 第 ZZ 集加更.ext"},
+                            {"component": "div", "text": "yy = 该季正片最大集号 + 序号（排在季末）"},
+                            {"component": "div", "text": "ZZ = 源文件期号 × 2"},
+                            {"component": "div", "props": {"class": "mt-2"}, "text": "源文件只读不写，删除媒体库里的链接不影响源文件。"},
+                        ],
+                    }],
                 }],
             }],
         }
@@ -376,11 +377,16 @@ class VarietyExtraOrganizer(_PluginBase):
     # ==================== 运行时状态 ====================
 
     @staticmethod
-    def _stat_card(title: str, value: str, color: str, sub: str = "") -> dict:
+    def _stat_card(title: str, value: str, value_class: str = "text-h6",
+                   sub: str = "") -> dict:
         """构造一个统计卡片：标题 / 数值 / 可选附注"""
         texts = [
-            {"component": "VCardText", "props": {"class": "text-caption pb-0"}, "text": title},
-            {"component": "VCardText", "props": {"class": "text-h6 py-1"}, "text": value},
+            {
+                "component": "VCardText",
+                "props": {"class": "text-caption text-medium-emphasis pb-1"},
+                "text": title,
+            },
+            {"component": "VCardText", "props": {"class": f"{value_class} py-1"}, "text": value},
         ]
         if sub:
             texts.append({
@@ -390,10 +396,10 @@ class VarietyExtraOrganizer(_PluginBase):
             })
         return {
             "component": "VCol",
-            "props": {"cols": 12, "md": 3},
+            "props": {"cols": 12, "sm": 6, "md": 3},
             "content": [{
                 "component": "VCard",
-                "props": {"variant": "tonal", "color": color},
+                "props": {"variant": "outlined", "class": "h-100"},
                 "content": texts,
             }],
         }
@@ -495,6 +501,16 @@ class VarietyExtraOrganizer(_PluginBase):
         m = re.search(r'[\u4e00-\u9fa5]+', dirname)
         return m.group(0) if m else dirname
 
+    @staticmethod
+    def _count_jia(path: Path) -> int:
+        """统计目录里已存在的加更文件数"""
+        if not path.is_dir():
+            return 0
+        try:
+            return sum(1 for name in os.listdir(path) if '加更' in name)
+        except OSError:
+            return 0
+
     def _max_ep_in_dir(self, path: Path) -> Tuple[int, int]:
         """返回目录内（跳过加更文件）的最大集号与文件数"""
         if not path.is_dir():
@@ -529,6 +545,7 @@ class VarietyExtraOrganizer(_PluginBase):
             """收尾：补上耗时、写日志、落盘统计"""
             stats["seconds"] = round(time.time() - started, 1)
             stats["linked"] = total
+            stats["in_library"] = lib_jia
             text = f"{message}（用时 {stats['seconds']}s）"
             stats["message"] = text
             self._last_run = stats
@@ -539,6 +556,7 @@ class VarietyExtraOrganizer(_PluginBase):
             self._save_state()
 
         total = 0
+        lib_jia = 0
         if not self._src_dir or not self._dst_dir:
             finish("源目录或媒体库目录未配置，跳过本次扫描", "warning")
             return
@@ -617,6 +635,7 @@ class VarietyExtraOrganizer(_PluginBase):
                         "如果正片确实已入库，检查正片文件名是否带 SxxEyy（如 S04E01），"
                         "或确认「媒体库目录」指向的是正片实际所在目录。",
                     )
+                    lib_jia += self._count_jia(season_target)
                     continue
 
                 if dst_max == 0:
@@ -644,6 +663,7 @@ class VarietyExtraOrganizer(_PluginBase):
                     except Exception as e:
                         stats["errors"] += 1
                         self._add_log("error", f"硬链接失败 {f}：{e}")
+                lib_jia += self._count_jia(season_target)
         except Exception as e:
             stats["errors"] += 1
             self._add_log("error", f"执行出错 {e}")

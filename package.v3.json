@@ -2,13 +2,14 @@
   "VarietyExtraOrganizer": {
     "name": "综艺加更整理",
     "description": "扫描综艺源目录，将 MoviePilot 无法识别的加更(Extra/Plus)文件硬链接到媒体库并规范命名，使飞牛/Emby 能正常刮削。源文件全程不动。",
-    "version": "1.1.5",
+    "version": "1.1.6",
     "author": "T1677",
     "level": 1,
     "icon": "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png",
     "labels": "文件整理,综艺",
     "system_version": ">=3.0.0",
     "history": {
+      "v1.1.6": "详情页视觉重排：卡片统一 outlined、状态只用文字着色、说明文字改分行；统计改为「库内加更」实时数量，累计新增/失败/运行次数放到附注",
       "v1.1.5": "换成自己的插件图标（icons/varietyextraorganizer.png）；前置条件提示改为「右上角捷径 → 词表 → 文件整理屏蔽词」",
       "v1.1.4": "状态卡改为四张并新增累计统计（累计链接/失败/运行次数），上次运行卡片带用时与季目录数，上次新增带跳过与失败明细",
       "v1.1.3": "详情页日志改为固定高度、框内滚动，显示最近 20 条并支持长行换行",
