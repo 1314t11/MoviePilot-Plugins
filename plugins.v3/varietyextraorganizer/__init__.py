@@ -33,7 +33,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件描述
     plugin_desc = "扫描综艺源目录，将无法识别的加更(Extra/Plus)文件硬链接到媒体库并规范命名。"
     # 插件图标
-    plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot/main/app.ico"
+    plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
     plugin_version = "1.1.5"
     # 插件作者
@@ -287,10 +287,10 @@ class VarietyExtraOrganizer(_PluginBase):
                         "variant": "tonal",
                         "title": "屏蔽词已配置" if blocked else "前置条件未满足：缺少屏蔽词「加更」",
                         "text": (
-                            "「捷径 → 词表 → 文件整理屏蔽词」里已有能命中加更文件的规则，"
+                            "「右上角『捷径』→ 词表 → 文件整理屏蔽词」里已有能命中加更文件的规则，"
                             "MoviePilot 整理时会跳过这些文件，留给插件处理。"
                             if blocked else
-                            "请到 MoviePilot 设置页右上角「捷径」→ 词表 → 文件整理屏蔽词，新增一条：加更"
+                            "请点设置页右上角「捷径」→「词表」→「文件整理屏蔽词」，新增一条：加更"
                             "（这里是正则，写这两个汉字即可，不需要加 .* 或引号）。"
                             "否则 MoviePilot 整理时会先把加更文件当成正片处理走，插件就没得处理了。"
                         ),
@@ -436,7 +436,7 @@ class VarietyExtraOrganizer(_PluginBase):
     _SAMPLE_NAME = "示例综艺.加更.DemoShow.S05E01.Plus.2025.1080p.mkv"
 
     def _check_block_word(self) -> Tuple[bool, str]:
-        """检查「捷径 → 词表 → 文件整理屏蔽词」里是否有能命中加更文件的规则"""
+        """检查「右上角捷径 → 词表 → 文件整理屏蔽词」里是否有能命中加更文件的规则"""
         try:
             rules = self.systemconfig.get(SystemConfigKey.TransferExcludeWords) or []
         except Exception as e:

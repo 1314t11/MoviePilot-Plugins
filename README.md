@@ -28,6 +28,8 @@ MoviePilot-Plugins/
 │   └── varietyextraorganizer/
 │       ├── __init__.py              # 插件主类（文件名必须是 __init__.py）
 │       └── README.md                # 使用文档，市场详情页会读取
+├── icons/                           # 插件图标
+│   └── varietyextraorganizer.png
 ├── package.json                     # 旧版索引（历史保留，V3 不会选中）
 └── plugins/                         # 旧版插件目录（历史保留）
 ```
