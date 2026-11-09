@@ -35,7 +35,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot/main/app.ico"
     # 插件版本
-    plugin_version = "1.1.0"
+    plugin_version = "1.1.1"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -268,13 +268,14 @@ class VarietyExtraOrganizer(_PluginBase):
                     "props": {
                         "type": "success" if blocked else "warning",
                         "variant": "tonal",
-                        "title": "词表屏蔽词已配置" if blocked else "前置条件未满足：缺少屏蔽词「加更」",
+                        "title": "屏蔽词已配置" if blocked else "前置条件未满足：缺少屏蔽词「加更」",
                         "text": (
-                            "MoviePilot 词表中已存在屏蔽词「加更」，加更文件不会被主程序误当成正片识别。"
+                            "「设置 → 目录设置 → 屏蔽词」里已有能命中加更文件的规则，"
+                            "MoviePilot 整理时会跳过这些文件，留给插件处理。"
                             if blocked else
-                            "请到「设置 → 词表 → 自定义识别词」新增一行：加更"
-                            "（只要这两个汉字，不要加 => 和空格）。"
-                            "否则 MoviePilot 可能先把加更文件识别成正片并处理掉，插件就无从下手。"
+                            "请到「设置 → 目录设置 → 屏蔽词」新增一条：加更"
+                            "（这里是正则，写这两个汉字即可，不需要加 .* 或引号）。"
+                            "否则 MoviePilot 整理时会先把加更文件当成正片处理走，插件就没得处理了。"
                         ),
                     },
                 }],
@@ -384,21 +385,31 @@ class VarietyExtraOrganizer(_PluginBase):
         except Exception as e:
             logger.error(f"综艺加更整理：保存运行记录失败：{e}")
 
+    # 判断屏蔽词是否覆盖加更文件时使用的样例名
+    _SAMPLE_NAME = "示例综艺.加更.DemoShow.S05E01.Plus.2025.1080p.mkv"
+
     def _check_block_word(self) -> Tuple[bool, str]:
-        """检查 MoviePilot 词表里是否配了屏蔽词「加更」"""
+        """检查「设置 → 目录设置 → 屏蔽词」里是否有能命中加更文件的规则"""
         try:
-            rules = self.systemconfig.get(SystemConfigKey.CustomIdentifiers) or []
+            rules = self.systemconfig.get(SystemConfigKey.TransferExcludeWords) or []
         except Exception as e:
-            return False, f"读取词表失败：{e}"
+            return False, f"读取屏蔽词失败：{e}"
+        if isinstance(rules, str):
+            rules = rules.splitlines()
         for rule in rules:
             if not isinstance(rule, str):
                 continue
-            text = rule.strip()
-            if not text or text.startswith("#"):
+            pattern = rule.strip()
+            if not pattern or pattern.startswith("#"):
                 continue
-            if text == "加更":
-                return True, ""
-        return False, "词表里没有屏蔽词「加更」"
+            try:
+                # 屏蔽词是正则，用真实样例名试匹配
+                if re.search(pattern, self._SAMPLE_NAME):
+                    return True, ""
+            except re.error:
+                # 非法正则跳过，不影响其它规则
+                continue
+        return False, "文件整理屏蔽词里没有能匹配加更文件的规则"
 
     # ==================== 核心逻辑 ====================
 
