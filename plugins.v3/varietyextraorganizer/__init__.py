@@ -13,11 +13,15 @@
 """
 import os
 import re
+import time
+from collections import deque
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from app.schemas.types import SystemConfigKey
 from app.sdk.config import settings
 from app.sdk.logging import logger
 from app.sdk.plugin import _PluginBase
@@ -31,7 +35,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot/main/app.ico"
     # 插件版本
-    plugin_version = "1.0.1"
+    plugin_version = "1.1.0"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -51,8 +55,12 @@ class VarietyExtraOrganizer(_PluginBase):
     _dst_dir = ""
     _title_map = ""  # 剧名映射，格式：源目录关键字=显示剧名，多个用换行分隔
     _scan_interval = 60  # 定时扫描间隔（分钟）
+    _logs = deque(maxlen=40)  # 运行日志环形缓冲，详情页展示用
+    _last_run: Dict[str, Any] = {}  # 上次运行统计
+    _state_loaded = False
 
     def init_plugin(self, config: dict = None):
+        self._ensure_state()
         if config:
             self._enabled = config.get("enabled") or False
             self._onlyonce = config.get("onlyonce") or False
@@ -77,11 +85,11 @@ class VarietyExtraOrganizer(_PluginBase):
                 name="综艺加更整理",
             )
             self._scheduler.start()
-            logger.info("综艺加更整理插件已启动，扫描间隔 %s 分钟", self._scan_interval)
+            self._add_log("info", f"插件已启动，扫描间隔 {self._scan_interval} 分钟")
 
         if self._onlyonce:
             self._onlyonce = False
-            logger.info("综艺加更整理：立即运行一次")
+            self._add_log("info", "手动触发：立即运行一次")
             self.__organize()
 
     def get_state(self) -> bool:
@@ -224,7 +232,173 @@ class VarietyExtraOrganizer(_PluginBase):
         }
 
     def get_page(self) -> List[dict]:
-        return []
+        """插件详情页：运行状态、词表前置条件检查、最近运行日志"""
+        self._ensure_state()
+        blocked, _ = self._check_block_word()
+        last = self._last_run or {}
+
+        if not self._src_dir or not self._dst_dir:
+            state_color, state_text = "warning", "未配置目录"
+        elif not self._enabled:
+            state_color, state_text = "info", "已配置 · 未启用"
+        else:
+            state_color, state_text = "success", "运行中"
+
+        stats_row = {
+            "component": "VRow",
+            "content": [
+                self._stat_card("状态", state_text, state_color),
+                self._stat_card("上次运行", last.get("time") or "从未运行", "primary"),
+                self._stat_card("上次新增", f"{last.get('linked', 0)} 个", "info"),
+                self._stat_card(
+                    "上次失败",
+                    f"{last.get('errors', 0)} 个",
+                    "error" if last.get("errors") else "grey",
+                ),
+            ],
+        }
+
+        block_row = {
+            "component": "VRow",
+            "content": [{
+                "component": "VCol",
+                "props": {"cols": 12},
+                "content": [{
+                    "component": "VAlert",
+                    "props": {
+                        "type": "success" if blocked else "warning",
+                        "variant": "tonal",
+                        "title": "词表屏蔽词已配置" if blocked else "前置条件未满足：缺少屏蔽词「加更」",
+                        "text": (
+                            "MoviePilot 词表中已存在屏蔽词「加更」，加更文件不会被主程序误当成正片识别。"
+                            if blocked else
+                            "请到「设置 → 词表 → 自定义识别词」新增一行：加更"
+                            "（只要这两个汉字，不要加 => 和空格）。"
+                            "否则 MoviePilot 可能先把加更文件识别成正片并处理掉，插件就无从下手。"
+                        ),
+                    },
+                }],
+            }],
+        }
+
+        log_items: List[dict] = [
+            {
+                "component": "VCardText",
+                "props": {"class": "text-caption py-1"},
+                "text": line,
+            }
+            for line in list(self._logs)[-12:][::-1]
+        ]
+        if not log_items:
+            log_items = [{
+                "component": "VCardText",
+                "props": {"class": "text-caption py-2"},
+                "text": "暂无运行记录。到「配置」页勾选「立即运行一次」并保存，跑完这里就会有结果。",
+            }]
+
+        log_row = {
+            "component": "VRow",
+            "content": [{
+                "component": "VCol",
+                "props": {"cols": 12},
+                "content": [{
+                    "component": "VCard",
+                    "props": {"variant": "outlined"},
+                    "content": [
+                        {"component": "VCardTitle", "props": {"class": "text-subtitle-1"}, "text": "运行日志"},
+                        *log_items,
+                    ],
+                }],
+            }],
+        }
+
+        info_row = {
+            "component": "VRow",
+            "content": [{
+                "component": "VCol",
+                "props": {"cols": 12},
+                "content": [{
+                    "component": "VAlert",
+                    "props": {
+                        "type": "info",
+                        "variant": "tonal",
+                        "title": "命名规则",
+                        "text": (
+                            "输出：剧名 - SxxEyy - 第 ZZ 集加更.ext。"
+                            "yy = 该季已有正片最大集号 + 序号（排在季末），ZZ = 源文件期号 × 2。"
+                            "源文件只读不写，删除媒体库里的链接不会影响源文件。"
+                        ),
+                    },
+                }],
+            }],
+        }
+
+        return [stats_row, block_row, log_row, info_row]
+
+    # ==================== 运行时状态 ====================
+
+    @staticmethod
+    def _stat_card(title: str, value: str, color: str) -> dict:
+        """构造一个统计卡片"""
+        return {
+            "component": "VCol",
+            "props": {"cols": 12, "md": 3},
+            "content": [{
+                "component": "VCard",
+                "props": {"variant": "tonal", "color": color},
+                "content": [
+                    {"component": "VCardText", "props": {"class": "text-caption"}, "text": title},
+                    {"component": "VCardText", "props": {"class": "text-h6"}, "text": value},
+                ],
+            }],
+        }
+
+    def _ensure_state(self):
+        """首次访问时从插件数据里恢复上次统计与日志"""
+        if self._state_loaded:
+            return
+        self._state_loaded = True
+        try:
+            self._last_run = self.get_data("last_run") or {}
+            for item in (self.get_data("run_logs") or []):
+                self._logs.append(str(item))
+        except Exception as e:
+            logger.debug(f"综艺加更整理：读取历史运行记录失败：{e}")
+
+    def _add_log(self, level: str, message: str):
+        """同时写入宿主日志和插件内日志缓冲"""
+        try:
+            getattr(logger, level if level in ("debug", "info", "warning", "error") else "info")(
+                f"综艺加更整理：{message}"
+            )
+        except Exception:
+            pass
+        stamp = datetime.now().strftime("%m-%d %H:%M:%S")
+        self._logs.append(f"{stamp} [{level.upper()}] {message}")
+
+    def _save_state(self):
+        """持久化统计与日志，重启后详情页仍能看到"""
+        try:
+            self.save_data("last_run", self._last_run)
+            self.save_data("run_logs", list(self._logs))
+        except Exception as e:
+            logger.error(f"综艺加更整理：保存运行记录失败：{e}")
+
+    def _check_block_word(self) -> Tuple[bool, str]:
+        """检查 MoviePilot 词表里是否配了屏蔽词「加更」"""
+        try:
+            rules = self.systemconfig.get(SystemConfigKey.CustomIdentifiers) or []
+        except Exception as e:
+            return False, f"读取词表失败：{e}"
+        for rule in rules:
+            if not isinstance(rule, str):
+                continue
+            text = rule.strip()
+            if not text or text.startswith("#"):
+                continue
+            if text == "加更":
+                return True, ""
+        return False, "词表里没有屏蔽词「加更」"
 
     # ==================== 核心逻辑 ====================
 
@@ -265,18 +439,39 @@ class VarietyExtraOrganizer(_PluginBase):
 
     def __organize(self):
         """执行加更整理"""
+        started = time.time()
+        stats: Dict[str, Any] = {
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "seasons": 0,
+            "linked": 0,
+            "skipped": 0,
+            "errors": 0,
+            "seconds": 0.0,
+            "message": "",
+        }
+
+        def finish(message: str, level: str = "info"):
+            """收尾：补上耗时、写日志、落盘统计"""
+            stats["seconds"] = round(time.time() - started, 1)
+            stats["linked"] = total
+            text = f"{message}（用时 {stats['seconds']}s）"
+            stats["message"] = text
+            self._last_run = stats
+            self._add_log(level, text)
+            self._save_state()
+
+        total = 0
         if not self._src_dir or not self._dst_dir:
-            logger.warning("综艺加更整理：源目录或媒体库目录未配置")
+            finish("源目录或媒体库目录未配置，跳过本次扫描", "warning")
             return
 
         src = Path(self._src_dir)
         dst = Path(self._dst_dir)
         if not src.is_dir():
-            logger.warning("综艺加更整理：源目录不存在 %s", self._src_dir)
+            finish(f"源目录不存在：{self._src_dir}", "warning")
             return
 
         title_map = self._parse_title_map()
-        total = 0
 
         try:
             for season_dir in sorted(src.iterdir()):
@@ -286,12 +481,13 @@ class VarietyExtraOrganizer(_PluginBase):
                 if not sm:
                     continue
                 season = int(sm.group(1))
+                stats["seasons"] += 1
 
                 # 收集加更文件
                 try:
                     files = [f for f in os.listdir(season_dir) if self._is_jia(f)]
                 except OSError as e:
-                    logger.error("综艺加更整理：读取目录失败 %s：%s", season_dir, e)
+                    self._add_log("error", f"读取目录失败 {season_dir}：{e}")
                     continue
                 if not files:
                     continue
@@ -331,7 +527,7 @@ class VarietyExtraOrganizer(_PluginBase):
                             max_ep = ep
 
                 if max_ep == 0:
-                    logger.info("综艺加更整理：%s Season %d 无正片，跳过", title, season)
+                    self._add_log("info", f"{title} Season {season} 无正片，跳过（先让正片入库）")
                     continue
 
                 season_target.mkdir(parents=True, exist_ok=True)
@@ -344,17 +540,21 @@ class VarietyExtraOrganizer(_PluginBase):
                     new_name = f"{title} - S{season:02d}E{new_ep:02d} - 第 {jihao:02d} 集加更{ext}"
                     dst_file = season_target / new_name
                     if dst_file.exists():
+                        stats["skipped"] += 1
                         continue
                     try:
                         os.link(str(season_dir / f), str(dst_file))
                         total += 1
-                        logger.info("综艺加更整理：%s -> %s", f, new_name)
+                        self._add_log("info", f"{f} -> {new_name}")
                     except Exception as e:
-                        logger.error("综艺加更整理：硬链接失败 %s：%s", f, e)
+                        stats["errors"] += 1
+                        self._add_log("error", f"硬链接失败 {f}：{e}")
         except Exception as e:
-            logger.error("综艺加更整理：执行出错 %s", e)
+            stats["errors"] += 1
+            self._add_log("error", f"执行出错 {e}")
 
-        logger.info("综艺加更整理：本次共硬链接 %d 个加更文件", total)
+        finish(f"扫描完成：{stats['seasons']} 个季目录，新增 {total} 个链接，跳过 {stats['skipped']} 个已存在，失败 {stats['errors']} 个",
+               "warning" if stats["errors"] else "info")
 
     def organize_now(self, apikey: str = None) -> dict:
         """立即整理一次（API 入口）"""
