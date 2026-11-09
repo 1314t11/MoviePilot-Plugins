@@ -36,7 +36,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.2.1"
+    plugin_version = "1.2.2"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -553,32 +553,38 @@ class VarietyExtraOrganizer(_PluginBase):
         return m.group(0) if m else dirname
 
     def _write_episode_nfo(self, video: Path, show_title: str, season: int,
-                           episode: int, title: str, plot: str) -> bool:
-        """生成同名 episodedetails NFO，供飞牛/Emby「优先读取本地 NFO」使用"""
+                           episode: int, title: str, year: str, date: str) -> bool:
+        """生成同名 episodedetails NFO，供飞牛/Emby「优先读取本地 NFO」使用
+
+        字段风格对齐飞牛自己生成的 NFO：title / premiered / releasedate / year /
+        seasonnumber / episodenumber，另附 season / episode 兼容 Kodi 系解析。
+        不写 plot，避免覆盖站点简介。
+        """
         if not self._write_nfo:
             return False
         nfo = video.with_suffix(".nfo")
-        title_tag = f"<title>{xml_escape(title)}</title>"
-        if nfo.exists():
-            try:
-                if title_tag in nfo.read_text(encoding="utf-8"):
-                    return False
-                # 标题变了（例如插件升级后改了命名口径）就重写，保持一致
-                self._add_log("info", f"更新 NFO 标题：{nfo.name}")
-            except OSError:
-                pass
         content = (
-            '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n'
+            '<?xml version="1.0" encoding="utf-8"?>\n'
             "<episodedetails>\n"
             f"  <title>{xml_escape(title)}</title>\n"
             f"  <showtitle>{xml_escape(show_title)}</showtitle>\n"
+            f"  <premiered>{date}</premiered>\n"
+            f"  <releasedate>{date}</releasedate>\n"
+            f"  <aired>{date}</aired>\n"
+            f"  <year>{year}</year>\n"
+            f"  <seasonnumber>{season}</seasonnumber>\n"
+            f"  <episodenumber>{episode}</episodenumber>\n"
             f"  <season>{season}</season>\n"
             f"  <episode>{episode}</episode>\n"
-            f"  <plot>{xml_escape(plot)}</plot>\n"
             "</episodedetails>\n"
         )
         try:
+            if nfo.exists() and nfo.read_text(encoding="utf-8") == content:
+                return False
+            existed = nfo.exists()
             nfo.write_text(content, encoding="utf-8")
+            if existed:
+                self._add_log("info", f"更新 NFO：{nfo.name}")
             return True
         except OSError as e:
             self._add_log("error", f"写入 NFO 失败 {nfo.name}：{e}")
@@ -749,17 +755,24 @@ class VarietyExtraOrganizer(_PluginBase):
                     new_name = f"{title} - S{season:02d}E{new_ep:02d} - 第 {jihao:02d} 集加更{ext}"
                     dst_file = season_target / new_name
                     ep_title = dst_file.stem  # 与视频文件名完全一致，界面显示的就是这个名字
-                    ep_plot = f"{title} 第 {qihao} 期加更（源文件：{f}）"
+                    try:
+                        ep_date = datetime.fromtimestamp(
+                            (season_dir / f).stat().st_mtime).strftime("%Y-%m-%d")
+                    except OSError:
+                        ep_date = datetime.now().strftime("%Y-%m-%d")
+                    ep_year = show_year or ep_date[:4]
                     if dst_file.exists():
                         stats["skipped"] += 1
-                        if self._write_episode_nfo(dst_file, title, season, new_ep, ep_title, ep_plot):
+                        if self._write_episode_nfo(
+                                dst_file, title, season, new_ep, ep_title, ep_year, ep_date):
                             stats["nfo"] += 1
                         continue
                     try:
                         os.link(str(season_dir / f), str(dst_file))
                         total += 1
                         self._add_log("info", f"{f} -> {new_name}")
-                        if self._write_episode_nfo(dst_file, title, season, new_ep, ep_title, ep_plot):
+                        if self._write_episode_nfo(
+                                dst_file, title, season, new_ep, ep_title, ep_year, ep_date):
                             stats["nfo"] += 1
                     except Exception as e:
                         stats["errors"] += 1

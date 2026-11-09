@@ -218,15 +218,24 @@ PLUGIN_MARKET=https://github.com/jxxghp/MoviePilot-Plugins,https://github.com/13
    所以界面上显示什么，和你在文件管理器里看到的名字完全一致：
 
 ```xml
-<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml version="1.0" encoding="utf-8"?>
 <episodedetails>
   <title>示例综艺 - S05E25 - 第 04 集加更</title>
   <showtitle>示例综艺</showtitle>
+  <premiered>2025-11-08</premiered>
+  <releasedate>2025-11-08</releasedate>
+  <aired>2025-11-08</aired>
+  <year>2020</year>
+  <seasonnumber>5</seasonnumber>
+  <episodenumber>25</episodenumber>
   <season>5</season>
   <episode>25</episode>
-  <plot>示例综艺 第 2 期加更（源文件：示例综艺.加更...S05E02.Plus...mkv）</plot>
 </episodedetails>
 ```
+
+字段说明（对齐飞牛自带 NFO 的写法，`premiered/releasedate/aired` 取源文件的修改日期）：
+`seasonnumber/episodenumber` 给飞牛用，`season/episode` 兼容 Kodi/Emby 系解析。
+**不写 `plot`/`outline`**，避免和站点简介打架。
 
 4. 在飞牛里对该文件重新识别/刷新元数据，标题就变成 NFO 里的值。
 
@@ -337,6 +346,7 @@ PLUGIN_MARKET=https://github.com/jxxghp/MoviePilot-Plugins,https://github.com/13
 
 | 版本 | 说明 |
 |---|---|
+| v1.2.2 | NFO 结构对齐飞牛自带格式（`seasonnumber`/`episodenumber` + `premiered`/`releasedate`/`aired`/`year`），不再写 `plot`；内容有变化才重写 |
 | v1.2.1 | NFO 的 `<title>` 改为与视频文件名完全一致（如 `示例综艺 - S05E25 - 第 04 集加更`）；标题变化时自动重写旧 NFO |
 | v1.2.0 | 新增「生成同名 NFO」开关：为加更文件写 `episodedetails`，飞牛/Emby 开启「优先读取本地 NFO」后界面显示「第 ZZ 集加更」 |
 | v1.1.7 | 稳定性修复：实例级状态（重载不叠加日志）、扫描间隔容错、季目录名兼容结尾无点、`.PLUS/.plus` 大小写兼容、并发保护、源目录与媒体库同目录拦截 |
