@@ -35,7 +35,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.1.6"
+    plugin_version = "1.1.7"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -59,6 +59,16 @@ class VarietyExtraOrganizer(_PluginBase):
     _last_run: Dict[str, Any] = {}  # 上次运行统计
     _totals: Dict[str, int] = {}  # 累计统计：runs/linked/errors
     _state_loaded = False
+    _running = False  # 防止定时与手动触发并发
+
+    def __init__(self):
+        super().__init__()
+        # 每个实例独立持有，避免重载后日志重复叠加
+        self._logs = deque(maxlen=40)
+        self._last_run = {}
+        self._totals = {}
+        self._state_loaded = False
+        self._running = False
 
     def init_plugin(self, config: dict = None):
         self._ensure_state()
@@ -68,7 +78,10 @@ class VarietyExtraOrganizer(_PluginBase):
             self._src_dir = config.get("src_dir") or ""
             self._dst_dir = config.get("dst_dir") or ""
             self._title_map = config.get("title_map") or ""
-            self._scan_interval = int(config.get("scan_interval") or 60)
+            try:
+                self._scan_interval = max(int(config.get("scan_interval") or 60), 1)
+            except (TypeError, ValueError):
+                self._scan_interval = 60
 
         # 停止旧任务，保证可重复初始化
         self.stop_service()
@@ -478,7 +491,8 @@ class VarietyExtraOrganizer(_PluginBase):
     @staticmethod
     def _is_jia(filename: str) -> bool:
         """判断是否加更文件：含「加更」且有 Extra/Plus 后缀"""
-        return ('加更' in filename) and ('.Extra' in filename or '.Plus' in filename)
+        name = filename.lower()
+        return ('加更' in filename) and ('.extra' in name or '.plus' in name)
 
     def _parse_title_map(self) -> Dict[str, str]:
         """解析剧名映射配置"""
@@ -530,6 +544,10 @@ class VarietyExtraOrganizer(_PluginBase):
 
     def __organize(self):
         """执行加更整理"""
+        if self._running:
+            self._add_log("warning", "上一轮扫描还没结束，本次触发已跳过")
+            return
+        self._running = True
         started = time.time()
         stats: Dict[str, Any] = {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -549,6 +567,7 @@ class VarietyExtraOrganizer(_PluginBase):
             text = f"{message}（用时 {stats['seconds']}s）"
             stats["message"] = text
             self._last_run = stats
+            self._running = False
             self._totals["runs"] = int(self._totals.get("runs", 0)) + 1
             self._totals["linked"] = int(self._totals.get("linked", 0)) + stats["linked"]
             self._totals["errors"] = int(self._totals.get("errors", 0)) + stats["errors"]
@@ -566,6 +585,12 @@ class VarietyExtraOrganizer(_PluginBase):
         if not src.is_dir():
             finish(f"源目录不存在：{self._src_dir}", "warning")
             return
+        try:
+            if src.resolve() == dst.resolve():
+                finish("源目录和媒体库目录不能是同一个目录，否则会往源目录里写链接", "error")
+                return
+        except OSError:
+            pass
 
         title_map = self._parse_title_map()
 
@@ -573,7 +598,7 @@ class VarietyExtraOrganizer(_PluginBase):
             for season_dir in sorted(src.iterdir()):
                 if not season_dir.is_dir():
                     continue
-                sm = re.search(r'\.S(\d+)\.', season_dir.name)
+                sm = re.search(r'\.S(\d+)(?:\.|$)', season_dir.name)
                 if not sm:
                     continue
                 season = int(sm.group(1))
