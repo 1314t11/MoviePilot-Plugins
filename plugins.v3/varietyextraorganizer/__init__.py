@@ -14,6 +14,7 @@
 import os
 import re
 import time
+from xml.sax.saxutils import escape as xml_escape
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.1.7"
+    plugin_version = "1.2.0"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -55,6 +56,7 @@ class VarietyExtraOrganizer(_PluginBase):
     _dst_dir = ""
     _title_map = ""  # 剧名映射，格式：源目录关键字=显示剧名，多个用换行分隔
     _scan_interval = 60  # 定时扫描间隔（分钟）
+    _write_nfo = True  # 是否生成同名 NFO，让飞牛/Emby 显示「第 ZZ 集加更」
     _logs = deque(maxlen=40)  # 运行日志环形缓冲，详情页展示用
     _last_run: Dict[str, Any] = {}  # 上次运行统计
     _totals: Dict[str, int] = {}  # 累计统计：runs/linked/errors
@@ -82,6 +84,7 @@ class VarietyExtraOrganizer(_PluginBase):
                 self._scan_interval = max(int(config.get("scan_interval") or 60), 1)
             except (TypeError, ValueError):
                 self._scan_interval = 60
+            self._write_nfo = bool(config.get("write_nfo", True))
 
         # 停止旧任务，保证可重复初始化
         self.stop_service()
@@ -170,6 +173,32 @@ class VarietyExtraOrganizer(_PluginBase):
                         'content': [
                             {
                                 'component': 'VCol',
+                                'props': {'cols': 12, 'md': 4},
+                                'content': [{
+                                    'component': 'VSwitch',
+                                    'props': {'model': 'write_nfo', 'label': '生成同名 NFO'},
+                                }],
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {'cols': 12, 'md': 8},
+                                'content': [{
+                                    'component': 'VAlert',
+                                    'props': {
+                                        'type': 'info',
+                                        'variant': 'tonal',
+                                        'density': 'compact',
+                                        'text': '生成 .nfo 后，飞牛影视在媒体库高级设置里开启「优先读取本地 NFO 和图片」，加更集就会显示成「第 ZZ 集加更」而不是空白标题。',
+                                    },
+                                }],
+                            },
+                        ],
+                    },
+                    {
+                        'component': 'VRow',
+                        'content': [
+                            {
+                                'component': 'VCol',
                                 'props': {'cols': 12},
                                 'content': [{
                                     'component': 'VTextField',
@@ -243,6 +272,7 @@ class VarietyExtraOrganizer(_PluginBase):
             "dst_dir": "",
             "title_map": "",
             "scan_interval": 60,
+            "write_nfo": True,
         }
 
     def get_page(self) -> List[dict]:
@@ -385,6 +415,13 @@ class VarietyExtraOrganizer(_PluginBase):
             }],
         }
 
+        if self._write_nfo:
+            info_row["content"][0]["content"][0]["content"][0]["content"].append({
+                "component": "div",
+                "props": {"class": "mt-2"},
+                "text": "已开启同名 NFO：飞牛媒体库开启「优先读取本地 NFO 和图片」后，加更集会显示成「第 ZZ 集加更」。",
+            })
+
         return [stats_row, block_row, log_row, info_row]
 
     # ==================== 运行时状态 ====================
@@ -515,6 +552,31 @@ class VarietyExtraOrganizer(_PluginBase):
         m = re.search(r'[\u4e00-\u9fa5]+', dirname)
         return m.group(0) if m else dirname
 
+    def _write_episode_nfo(self, video: Path, show_title: str, season: int,
+                           episode: int, title: str, plot: str) -> bool:
+        """生成同名 episodedetails NFO，供飞牛/Emby「优先读取本地 NFO」使用"""
+        if not self._write_nfo:
+            return False
+        nfo = video.with_suffix(".nfo")
+        if nfo.exists():
+            return False
+        content = (
+            '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n'
+            "<episodedetails>\n"
+            f"  <title>{xml_escape(title)}</title>\n"
+            f"  <showtitle>{xml_escape(show_title)}</showtitle>\n"
+            f"  <season>{season}</season>\n"
+            f"  <episode>{episode}</episode>\n"
+            f"  <plot>{xml_escape(plot)}</plot>\n"
+            "</episodedetails>\n"
+        )
+        try:
+            nfo.write_text(content, encoding="utf-8")
+            return True
+        except OSError as e:
+            self._add_log("error", f"写入 NFO 失败 {nfo.name}：{e}")
+            return False
+
     @staticmethod
     def _count_jia(path: Path) -> int:
         """统计目录里已存在的加更文件数"""
@@ -555,6 +617,7 @@ class VarietyExtraOrganizer(_PluginBase):
             "linked": 0,
             "skipped": 0,
             "errors": 0,
+            "nfo": 0,
             "seconds": 0.0,
             "message": "",
         }
@@ -678,13 +741,19 @@ class VarietyExtraOrganizer(_PluginBase):
                     ext = self._get_ext(f)
                     new_name = f"{title} - S{season:02d}E{new_ep:02d} - 第 {jihao:02d} 集加更{ext}"
                     dst_file = season_target / new_name
+                    ep_title = f"第 {jihao:02d} 集加更"
+                    ep_plot = f"{title} 第 {qihao} 期加更（源文件：{f}）"
                     if dst_file.exists():
                         stats["skipped"] += 1
+                        if self._write_episode_nfo(dst_file, title, season, new_ep, ep_title, ep_plot):
+                            stats["nfo"] += 1
                         continue
                     try:
                         os.link(str(season_dir / f), str(dst_file))
                         total += 1
                         self._add_log("info", f"{f} -> {new_name}")
+                        if self._write_episode_nfo(dst_file, title, season, new_ep, ep_title, ep_plot):
+                            stats["nfo"] += 1
                     except Exception as e:
                         stats["errors"] += 1
                         self._add_log("error", f"硬链接失败 {f}：{e}")
@@ -693,7 +762,8 @@ class VarietyExtraOrganizer(_PluginBase):
             stats["errors"] += 1
             self._add_log("error", f"执行出错 {e}")
 
-        finish(f"扫描完成：{stats['seasons']} 个季目录，新增 {total} 个链接，跳过 {stats['skipped']} 个已存在，失败 {stats['errors']} 个",
+        nfo_info = f"，生成 {stats['nfo']} 个 NFO" if self._write_nfo else ""
+        finish(f"扫描完成：{stats['seasons']} 个季目录，新增 {total} 个链接，跳过 {stats['skipped']} 个已存在，失败 {stats['errors']} 个{nfo_info}",
                "warning" if stats["errors"] else "info")
 
     def organize_now(self, apikey: str = None) -> dict:
