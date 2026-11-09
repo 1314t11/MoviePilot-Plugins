@@ -1,0 +1,11 @@
+{
+  "varietyextraorganizer": {
+    "id": "varietyextraorganizer",
+    "name": "综艺加更整理",
+    "description": "扫描综艺源目录，将 MoviePilot 无法识别的加更(Extra/Plus)文件硬链接到媒体库并规范命名(剧名 - SxxEyy - 第 ZZ 集加更)，使飞牛/Emby 能正常刮削。源文件不动。",
+    "version": "1.0.0",
+    "author": "T1677",
+    "level": 1,
+    "icon": "https://raw.githubusercontent.com/jxxghp/MoviePilot/main/app.ico"
+  }
+}
