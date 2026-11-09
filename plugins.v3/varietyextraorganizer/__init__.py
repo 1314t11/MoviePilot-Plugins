@@ -35,7 +35,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot/main/app.ico"
     # 插件版本
-    plugin_version = "1.1.1"
+    plugin_version = "1.1.2"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -448,6 +448,23 @@ class VarietyExtraOrganizer(_PluginBase):
         m = re.search(r'[\u4e00-\u9fa5]+', dirname)
         return m.group(0) if m else dirname
 
+    def _max_ep_in_dir(self, path: Path) -> Tuple[int, int]:
+        """返回目录内（跳过加更文件）的最大集号与文件数"""
+        if not path.is_dir():
+            return 0, 0
+        max_ep, count = 0, 0
+        try:
+            for name in os.listdir(path):
+                if '加更' in name:
+                    continue
+                count += 1
+                ep = self._get_ep(name)
+                if ep > max_ep:
+                    max_ep = ep
+        except OSError as e:
+            self._add_log("error", f"读取目录失败 {path}：{e}")
+        return max_ep, count
+
     def __organize(self):
         """执行加更整理"""
         started = time.time()
@@ -506,18 +523,27 @@ class VarietyExtraOrganizer(_PluginBase):
 
                 # 解析剧名
                 title = self._resolve_title(season_dir.name, title_map)
-                ym = re.search(r'\.S\d+\.(\d{4})\.', season_dir.name)
+                ym = re.search(r'\.S\d+\.(\d{4})(?:\.|$)', season_dir.name)
                 # 年份以媒体库已有目录为准（通常为首播年），没有再退回源目录年份
-                target_show_dir = None
                 show_year = ym.group(1) if ym else None
+
+                # 媒体库里同名剧集可能有多个目录（年份不同），选该季文件最多的那个
+                candidates = []
                 if dst.is_dir():
-                    for sub in dst.iterdir():
-                        if sub.is_dir() and title in sub.name:
-                            ym2 = re.search(r'\((\d{4})\)', sub.name)
-                            if ym2:
-                                show_year = ym2.group(1)
-                            target_show_dir = sub
-                            break
+                    try:
+                        candidates = [s for s in dst.iterdir() if s.is_dir() and title in s.name]
+                    except OSError as e:
+                        self._add_log("error", f"读取媒体库目录失败 {dst}：{e}")
+
+                target_show_dir = None
+                if candidates:
+                    target_show_dir = max(
+                        candidates,
+                        key=lambda s: self._max_ep_in_dir(s / f"Season {season}")[1],
+                    )
+                    ym2 = re.search(r'\((\d{4})\)', target_show_dir.name)
+                    if ym2:
+                        show_year = ym2.group(1)
 
                 if target_show_dir is None:
                     if show_year:
@@ -527,19 +553,27 @@ class VarietyExtraOrganizer(_PluginBase):
 
                 season_target = target_show_dir / f"Season {season}"
 
-                # 读取该季正片的最大集号（跳过已整理的加更文件）
-                max_ep = 0
-                if season_target.is_dir():
-                    for f in os.listdir(season_target):
-                        if '加更' in f:
-                            continue
-                        ep = self._get_ep(f)
-                        if ep > max_ep:
-                            max_ep = ep
+                # 集号同时参考源目录和媒体库：库内命名不一定带 SxxEyy，源目录通常带
+                src_max, src_count = self._max_ep_in_dir(season_dir)
+                dst_max, dst_count = self._max_ep_in_dir(season_target)
+                max_ep = max(src_max, dst_max)
 
                 if max_ep == 0:
-                    self._add_log("info", f"{title} Season {season} 无正片，跳过（先让正片入库）")
+                    self._add_log(
+                        "warning",
+                        f"{title} S{season:02d} 解析不到集号，跳过。"
+                        f"源目录 {src_count} 个文件、媒体库 {dst_count} 个文件都不含 SxxEyy；"
+                        f"目标路径：{season_target}。"
+                        "如果正片确实已入库，检查正片文件名是否带 SxxEyy（如 S04E01），"
+                        "或确认「媒体库目录」指向的是正片实际所在目录。",
+                    )
                     continue
+
+                if dst_max == 0:
+                    self._add_log(
+                        "info",
+                        f"{title} S{season:02d}：媒体库未解析到集号，按源目录最大集号 E{src_max} 续排",
+                    )
 
                 season_target.mkdir(parents=True, exist_ok=True)
 
