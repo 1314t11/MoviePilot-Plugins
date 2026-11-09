@@ -36,7 +36,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.2.3"
+    plugin_version = "1.2.4"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -529,11 +529,12 @@ class VarietyExtraOrganizer(_PluginBase):
     def _get_ext(filename: str) -> str:
         return os.path.splitext(filename)[1]
 
-    @staticmethod
-    def _is_jia(filename: str) -> bool:
-        """判断是否加更文件：含「加更」且有 Extra/Plus 后缀"""
-        name = filename.lower()
-        return ('加更' in filename) and ('.extra' in name or '.plus' in name)
+    _JIA_SUFFIX = re.compile(r'\.(?:extra|plus)(?:\.|$)', re.IGNORECASE)
+
+    @classmethod
+    def _is_jia(cls, filename: str) -> bool:
+        """判断是否加更文件：含「加更」且带独立的 .Extra/.Plus 后缀"""
+        return ('加更' in filename) and bool(cls._JIA_SUFFIX.search(filename))
 
     def _parse_title_map(self) -> Dict[str, str]:
         """解析剧名映射配置"""
@@ -695,6 +696,7 @@ class VarietyExtraOrganizer(_PluginBase):
             pass
 
         title_map = self._parse_title_map()
+        counted = set()  # 同一目标季只统计一次，避免重复计数
 
         try:
             for season_dir in sorted(src.iterdir()):
@@ -762,8 +764,10 @@ class VarietyExtraOrganizer(_PluginBase):
                         "如果正片确实已入库，检查正片文件名是否带 SxxEyy（如 S04E01），"
                         "或确认「媒体库目录」指向的是正片实际所在目录。",
                     )
-                    lib_jia += self._count_jia(season_target)
-                    lib_nfo += self._count_nfo(season_target)
+                    if str(season_target) not in counted:
+                        counted.add(str(season_target))
+                        lib_jia += self._count_jia(season_target)
+                        lib_nfo += self._count_nfo(season_target)
                     continue
 
                 if dst_max == 0:
@@ -777,7 +781,11 @@ class VarietyExtraOrganizer(_PluginBase):
                 for i, f in enumerate(jias, 1):
                     new_ep = max_ep + i
                     qihao = self._get_ep(f)
-                    jihao = qihao * 2
+                    if qihao:
+                        jihao = qihao * 2
+                    else:
+                        jihao = i * 2
+                        self._add_log("warning", f"{f} 文件名里没有 SxxEyy 期号，按第 {i} 个加更顺序编号")
                     ext = self._get_ext(f)
                     new_name = f"{title} - S{season:02d}E{new_ep:02d} - 第 {jihao:02d} 集加更{ext}"
                     dst_file = season_target / new_name
@@ -804,8 +812,10 @@ class VarietyExtraOrganizer(_PluginBase):
                     except Exception as e:
                         stats["errors"] += 1
                         self._add_log("error", f"硬链接失败 {f}：{e}")
-                lib_jia += self._count_jia(season_target)
-                lib_nfo += self._count_nfo(season_target)
+                if str(season_target) not in counted:
+                    counted.add(str(season_target))
+                    lib_jia += self._count_jia(season_target)
+                    lib_nfo += self._count_nfo(season_target)
         except Exception as e:
             stats["errors"] += 1
             self._add_log("error", f"执行出错 {e}")
