@@ -35,7 +35,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/jxxghp/MoviePilot/main/app.ico"
     # 插件版本
-    plugin_version = "1.1.3"
+    plugin_version = "1.1.4"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -57,6 +57,7 @@ class VarietyExtraOrganizer(_PluginBase):
     _scan_interval = 60  # 定时扫描间隔（分钟）
     _logs = deque(maxlen=40)  # 运行日志环形缓冲，详情页展示用
     _last_run: Dict[str, Any] = {}  # 上次运行统计
+    _totals: Dict[str, int] = {}  # 累计统计：runs/linked/errors
     _state_loaded = False
 
     def init_plugin(self, config: dict = None):
@@ -244,16 +245,32 @@ class VarietyExtraOrganizer(_PluginBase):
         else:
             state_color, state_text = "success", "运行中"
 
+        total_linked = int(self._totals.get("linked", 0))
+        total_errors = int(self._totals.get("errors", 0))
+        total_runs = int(self._totals.get("runs", 0))
+
         stats_row = {
             "component": "VRow",
             "content": [
                 self._stat_card("状态", state_text, state_color),
-                self._stat_card("上次运行", last.get("time") or "从未运行", "primary"),
-                self._stat_card("上次新增", f"{last.get('linked', 0)} 个", "info"),
                 self._stat_card(
-                    "上次失败",
-                    f"{last.get('errors', 0)} 个",
-                    "error" if last.get("errors") else "grey",
+                    "上次运行",
+                    last.get("time") or "从未运行",
+                    "primary",
+                    sub=(f"用时 {last.get('seconds', 0)}s · {last.get('seasons', 0)} 个季目录"
+                         if last else ""),
+                ),
+                self._stat_card(
+                    "上次新增",
+                    f"{last.get('linked', 0)} 个",
+                    "info",
+                    sub=f"跳过 {last.get('skipped', 0)} · 失败 {last.get('errors', 0)}",
+                ),
+                self._stat_card(
+                    "累计",
+                    f"{total_linked} 个链接",
+                    "success" if total_linked else "grey",
+                    sub=f"失败 {total_errors} · 运行 {total_runs} 次",
                 ),
             ],
         }
@@ -359,18 +376,25 @@ class VarietyExtraOrganizer(_PluginBase):
     # ==================== 运行时状态 ====================
 
     @staticmethod
-    def _stat_card(title: str, value: str, color: str) -> dict:
-        """构造一个统计卡片"""
+    def _stat_card(title: str, value: str, color: str, sub: str = "") -> dict:
+        """构造一个统计卡片：标题 / 数值 / 可选附注"""
+        texts = [
+            {"component": "VCardText", "props": {"class": "text-caption pb-0"}, "text": title},
+            {"component": "VCardText", "props": {"class": "text-h6 py-1"}, "text": value},
+        ]
+        if sub:
+            texts.append({
+                "component": "VCardText",
+                "props": {"class": "text-caption text-medium-emphasis pt-0"},
+                "text": sub,
+            })
         return {
             "component": "VCol",
             "props": {"cols": 12, "md": 3},
             "content": [{
                 "component": "VCard",
                 "props": {"variant": "tonal", "color": color},
-                "content": [
-                    {"component": "VCardText", "props": {"class": "text-caption"}, "text": title},
-                    {"component": "VCardText", "props": {"class": "text-h6"}, "text": value},
-                ],
+                "content": texts,
             }],
         }
 
@@ -381,6 +405,8 @@ class VarietyExtraOrganizer(_PluginBase):
         self._state_loaded = True
         try:
             self._last_run = self.get_data("last_run") or {}
+            for key, val in (self.get_data("totals") or {}).items():
+                self._totals[key] = int(val)
             for item in (self.get_data("run_logs") or []):
                 self._logs.append(str(item))
         except Exception as e:
@@ -401,6 +427,7 @@ class VarietyExtraOrganizer(_PluginBase):
         """持久化统计与日志，重启后详情页仍能看到"""
         try:
             self.save_data("last_run", self._last_run)
+            self.save_data("totals", self._totals)
             self.save_data("run_logs", list(self._logs))
         except Exception as e:
             logger.error(f"综艺加更整理：保存运行记录失败：{e}")
@@ -505,6 +532,9 @@ class VarietyExtraOrganizer(_PluginBase):
             text = f"{message}（用时 {stats['seconds']}s）"
             stats["message"] = text
             self._last_run = stats
+            self._totals["runs"] = int(self._totals.get("runs", 0)) + 1
+            self._totals["linked"] = int(self._totals.get("linked", 0)) + stats["linked"]
+            self._totals["errors"] = int(self._totals.get("errors", 0)) + stats["errors"]
             self._add_log(level, text)
             self._save_state()
 
