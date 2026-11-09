@@ -13,7 +13,7 @@ MoviePilot 自定义插件集合，按 **V3 索引规范**（`package.v3.json` +
 
 | 插件 | 插件 ID | 版本 | 一句话说明 | 文档 |
 |---|---|---|---|---|
-| 综艺加更整理 | `VarietyExtraOrganizer` | 1.2.2 | 把综艺「加更 / 加更 PLUS」文件硬链接进媒体库并规范命名为 `SxxEyy`，让飞牛、Emby 正常刮削；源文件不动 | [README](plugins.v3/varietyextraorganizer/README.md) |
+| 综艺加更整理 | `VarietyExtraOrganizer` | 1.2.3 | 把综艺「加更 / 加更 PLUS」文件硬链接进媒体库并规范命名为 `SxxEyy`，让飞牛、Emby 正常刮削；源文件不动 | [README](plugins.v3/varietyextraorganizer/README.md) |
 
 > 表格随插件增减手动维护；权威版本号以 `package.v3.json` 为准。
 

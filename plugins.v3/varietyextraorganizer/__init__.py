@@ -36,7 +36,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.2.2"
+    plugin_version = "1.2.3"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -419,7 +419,11 @@ class VarietyExtraOrganizer(_PluginBase):
             info_row["content"][0]["content"][0]["content"][0]["content"].append({
                 "component": "div",
                 "props": {"class": "mt-2"},
-                "text": "已开启同名 NFO：飞牛媒体库开启「优先读取本地 NFO 和图片」后，加更集标题会显示成与文件名一致（含「第 ZZ 集加更」）。",
+                "text": (
+                    f"已开启同名 NFO（库内覆盖 {last.get('nfo_exist', 0)}/{last.get('in_library', 0)}）："
+                    "飞牛媒体库开启「优先读取本地 NFO 和图片」后，"
+                    "加更集标题会显示成与文件名一致（含「第 ZZ 集加更」）。"
+                ),
             })
 
         return [stats_row, block_row, log_row, info_row]
@@ -591,12 +595,32 @@ class VarietyExtraOrganizer(_PluginBase):
             return False
 
     @staticmethod
-    def _count_jia(path: Path) -> int:
-        """统计目录里已存在的加更文件数"""
+    def _count_nfo(path: Path) -> int:
+        """统计目录里已有同名 NFO 的加更文件数"""
         if not path.is_dir():
             return 0
         try:
-            return sum(1 for name in os.listdir(path) if '加更' in name)
+            return sum(
+                1 for name in os.listdir(path)
+                if '加更' in name and not name.lower().endswith(".nfo")
+                and (path / name).with_suffix(".nfo").exists()
+            )
+        except OSError:
+            return 0
+
+    # 统计时排除的附属文件，避免把 nfo/字幕/图片当成视频
+    _SIDECAR_EXT = {".nfo", ".srt", ".ass", ".ssa", ".jpg", ".jpeg", ".png", ".webp"}
+
+    @classmethod
+    def _count_jia(cls, path: Path) -> int:
+        """统计目录里已存在的加更视频数（不含同名 nfo/字幕/图片）"""
+        if not path.is_dir():
+            return 0
+        try:
+            return sum(
+                1 for name in os.listdir(path)
+                if '加更' in name and os.path.splitext(name)[1].lower() not in cls._SIDECAR_EXT
+            )
         except OSError:
             return 0
 
@@ -640,6 +664,7 @@ class VarietyExtraOrganizer(_PluginBase):
             stats["seconds"] = round(time.time() - started, 1)
             stats["linked"] = total
             stats["in_library"] = lib_jia
+            stats["nfo_exist"] = lib_nfo
             text = f"{message}（用时 {stats['seconds']}s）"
             stats["message"] = text
             self._last_run = stats
@@ -652,6 +677,7 @@ class VarietyExtraOrganizer(_PluginBase):
 
         total = 0
         lib_jia = 0
+        lib_nfo = 0
         if not self._src_dir or not self._dst_dir:
             finish("源目录或媒体库目录未配置，跳过本次扫描", "warning")
             return
@@ -737,6 +763,7 @@ class VarietyExtraOrganizer(_PluginBase):
                         "或确认「媒体库目录」指向的是正片实际所在目录。",
                     )
                     lib_jia += self._count_jia(season_target)
+                    lib_nfo += self._count_nfo(season_target)
                     continue
 
                 if dst_max == 0:
@@ -778,11 +805,14 @@ class VarietyExtraOrganizer(_PluginBase):
                         stats["errors"] += 1
                         self._add_log("error", f"硬链接失败 {f}：{e}")
                 lib_jia += self._count_jia(season_target)
+                lib_nfo += self._count_nfo(season_target)
         except Exception as e:
             stats["errors"] += 1
             self._add_log("error", f"执行出错 {e}")
 
-        nfo_info = f"，生成 {stats['nfo']} 个 NFO" if self._write_nfo else ""
+        # stats 里的 nfo_exist/in_library 在 finish() 里才赋值，这里直接用局部变量
+        nfo_info = (f"，本次生成 {stats['nfo']} 个 NFO，库内覆盖 {lib_nfo}/{lib_jia}"
+                    if self._write_nfo else "")
         finish(f"扫描完成：{stats['seasons']} 个季目录，新增 {total} 个链接，跳过 {stats['skipped']} 个已存在，失败 {stats['errors']} 个{nfo_info}",
                "warning" if stats["errors"] else "info")
 
