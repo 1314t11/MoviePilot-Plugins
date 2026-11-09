@@ -36,7 +36,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.2.0"
+    plugin_version = "1.2.1"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -419,7 +419,7 @@ class VarietyExtraOrganizer(_PluginBase):
             info_row["content"][0]["content"][0]["content"][0]["content"].append({
                 "component": "div",
                 "props": {"class": "mt-2"},
-                "text": "已开启同名 NFO：飞牛媒体库开启「优先读取本地 NFO 和图片」后，加更集会显示成「第 ZZ 集加更」。",
+                "text": "已开启同名 NFO：飞牛媒体库开启「优先读取本地 NFO 和图片」后，加更集标题会显示成与文件名一致（含「第 ZZ 集加更」）。",
             })
 
         return [stats_row, block_row, log_row, info_row]
@@ -558,8 +558,15 @@ class VarietyExtraOrganizer(_PluginBase):
         if not self._write_nfo:
             return False
         nfo = video.with_suffix(".nfo")
+        title_tag = f"<title>{xml_escape(title)}</title>"
         if nfo.exists():
-            return False
+            try:
+                if title_tag in nfo.read_text(encoding="utf-8"):
+                    return False
+                # 标题变了（例如插件升级后改了命名口径）就重写，保持一致
+                self._add_log("info", f"更新 NFO 标题：{nfo.name}")
+            except OSError:
+                pass
         content = (
             '<?xml version="1.0" encoding="utf-8" standalone="yes"?>\n'
             "<episodedetails>\n"
@@ -741,7 +748,7 @@ class VarietyExtraOrganizer(_PluginBase):
                     ext = self._get_ext(f)
                     new_name = f"{title} - S{season:02d}E{new_ep:02d} - 第 {jihao:02d} 集加更{ext}"
                     dst_file = season_target / new_name
-                    ep_title = f"第 {jihao:02d} 集加更"
+                    ep_title = dst_file.stem  # 与视频文件名完全一致，界面显示的就是这个名字
                     ep_plot = f"{title} 第 {qihao} 期加更（源文件：{f}）"
                     if dst_file.exists():
                         stats["skipped"] += 1

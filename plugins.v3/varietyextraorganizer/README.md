@@ -214,12 +214,13 @@ PLUGIN_MARKET=https://github.com/jxxghp/MoviePilot-Plugins,https://github.com/13
 1. 插件配置页保持 **「生成同名 NFO」开启**（默认开）；
 2. 飞牛影视 → 媒体库 → 设置 → 高级设置 → 打开 **「优先读取本地 NFO 和图片」**
    （Emby/Jellyfin 对应「优先使用本地元数据」）；
-3. 插件会为每个加更文件写一个同名 `.nfo`：
+3. 插件会为每个加更文件写一个同名 `.nfo`，**`<title>` 就是视频文件名**，
+   所以界面上显示什么，和你在文件管理器里看到的名字完全一致：
 
 ```xml
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <episodedetails>
-  <title>第 04 集加更</title>
+  <title>示例综艺 - S05E25 - 第 04 集加更</title>
   <showtitle>示例综艺</showtitle>
   <season>5</season>
   <episode>25</episode>
@@ -231,9 +232,9 @@ PLUGIN_MARKET=https://github.com/jxxghp/MoviePilot-Plugins,https://github.com/13
 
 要点：
 
-- **NFO 已存在不会覆盖**——想改标题就删掉对应的 `.nfo` 再跑一次；
+- **NFO 已存在且标题一致时不重复写**；标题不一致（比如插件升级改了命名口径）会自动更新；
 - 关掉这个开关只生成视频链接，不生成 NFO；
-- 只给插件生成的加更文件写 NFO，正片不受影响；
+- **完全不碰正片**：只给插件自己链接出来的加更文件写同名 NFO，不写 `tvshow.nfo`，不改正片的任何 NFO；
 - 飞牛「其他视频」类型的库也会读 NFO，但不会联网刮削，适合纯本地管理。
 
 ---
@@ -336,6 +337,7 @@ PLUGIN_MARKET=https://github.com/jxxghp/MoviePilot-Plugins,https://github.com/13
 
 | 版本 | 说明 |
 |---|---|
+| v1.2.1 | NFO 的 `<title>` 改为与视频文件名完全一致（如 `示例综艺 - S05E25 - 第 04 集加更`）；标题变化时自动重写旧 NFO |
 | v1.2.0 | 新增「生成同名 NFO」开关：为加更文件写 `episodedetails`，飞牛/Emby 开启「优先读取本地 NFO」后界面显示「第 ZZ 集加更」 |
 | v1.1.7 | 稳定性修复：实例级状态（重载不叠加日志）、扫描间隔容错、季目录名兼容结尾无点、`.PLUS/.plus` 大小写兼容、并发保护、源目录与媒体库同目录拦截 |
 | v1.1.6 | 详情页视觉重排（卡片统一描边、状态仅文字着色、说明分行）；统计卡改为「库内加更」实时数量，累计数据移到附注 |
