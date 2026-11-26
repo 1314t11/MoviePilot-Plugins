@@ -32,11 +32,11 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件名称
     plugin_name = "综艺加更整理"
     # 插件描述
-    plugin_desc = "扫描综艺源目录，将无法识别的加更(Extra/Plus)文件硬链接到媒体库并规范命名。"
+    plugin_desc = "扫描综艺源目录，将无法识别的加更(Extra/Plus)与抢鲜(Preview)文件硬链接到媒体库并规范命名。"
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.2.5"
+    plugin_version = "1.3.0"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -280,7 +280,8 @@ class VarietyExtraOrganizer(_PluginBase):
     def get_page(self) -> List[dict]:
         """插件详情页：运行状态、词表前置条件检查、最近运行日志"""
         self._ensure_state()
-        blocked, _ = self._check_block_word()
+        missing_words = self._check_block_words()
+        blocked = not missing_words
         last = self._last_run or {}
 
         if not self._src_dir or not self._dst_dir:
@@ -311,7 +312,7 @@ class VarietyExtraOrganizer(_PluginBase):
                     sub=(f"跳过 {last.get('skipped', 0)} · 失败 {last.get('errors', 0)}"),
                 ),
                 self._stat_card(
-                    "库内加更",
+                    "库内条目",
                     f"{last.get('in_library', 0)} 个",
                     sub=f"累计新增 {total_linked} · 失败 {total_errors} · 运行 {total_runs} 次",
                 ),
@@ -329,14 +330,17 @@ class VarietyExtraOrganizer(_PluginBase):
                         "type": "success" if blocked else "warning",
                         "variant": "tonal",
                         "density": "compact",
-                        "title": "屏蔽词已配置" if blocked else "前置条件未满足：缺少屏蔽词「加更」",
+                        "title": "屏蔽词已配置" if blocked else
+                                 f"前置条件未满足：缺少屏蔽词「{'、'.join(missing_words)}」",
                         "text": (
-                            "「右上角『捷径』→ 词表 → 文件整理屏蔽词」里已有能命中加更文件的规则，"
+                            "「右上角『捷径』→ 词表 → 文件整理屏蔽词」里已有能命中加更/抢鲜文件的规则，"
                             "MoviePilot 整理时会跳过这些文件，留给插件处理。"
                             if blocked else
-                            "请点设置页右上角「捷径」→「词表」→「文件整理屏蔽词」，新增一条：加更"
-                            "（这里是正则，写这两个汉字即可，不需要加 .* 或引号）。"
-                            "否则 MoviePilot 整理时会先把加更文件当成正片处理走，插件就没得处理了。"
+                            f"请点设置页右上角「捷径」→「词表」→「文件整理屏蔽词」，"
+                            f"补上：{'、'.join(missing_words)}"
+                            "（这里是正则，写中文词即可；Preview 这种英文标记也建议加一条，"
+                            "不需要 .* 或引号）。"
+                            "否则 MoviePilot 整理时会先把它们当成正片处理走，插件就没得处理了。"
                         ),
                     },
                 }],
@@ -407,9 +411,9 @@ class VarietyExtraOrganizer(_PluginBase):
                         "props": {"class": "text-caption text-medium-emphasis"},
                         "content": [
                             {"component": "div", "props": {"class": "text-subtitle-2 mb-2"}, "text": "命名规则"},
-                            {"component": "div", "text": "剧名 - SxxEyy - 第 ZZ 集加更.ext"},
+                            {"component": "div", "text": "剧名 - SxxEyy - 第 ZZ 期加更/抢鲜.ext"},
                             {"component": "div", "text": "yy = 该季正片最大集号 + 序号（排在季末）"},
-                            {"component": "div", "text": "ZZ = 源文件期号 × 2"},
+                            {"component": "div", "text": "ZZ = 源文件期号；同一期先排加更、再排抢鲜"},
                             {"component": "div", "props": {"class": "mt-2"}, "text": "源文件只读不写，删除媒体库里的链接不影响源文件。"},
                         ],
                     }],
@@ -494,32 +498,38 @@ class VarietyExtraOrganizer(_PluginBase):
         except Exception as e:
             logger.error(f"综艺加更整理：保存运行记录失败：{e}")
 
-    # 判断屏蔽词是否覆盖加更文件时使用的样例名
-    _SAMPLE_NAME = "示例综艺.加更.DemoShow.S05E01.Plus.2025.1080p.mkv"
+    # 判断屏蔽词是否覆盖特殊文件时使用的样例名
+    _SAMPLES = {
+        "加更": "示例综艺.加更.DemoShow.S05E01.Plus.2025.1080p.mkv",
+        "抢鲜": "示例综艺.S05E01.Preview.2025.1080p.mkv",
+    }
 
-    def _check_block_word(self) -> Tuple[bool, str]:
-        """检查「右上角捷径 → 词表 → 文件整理屏蔽词」里是否有能命中加更文件的规则"""
+    def _check_block_words(self) -> List[str]:
+        """返回「文件整理屏蔽词」里缺失的类别（加更 / 抢鲜）"""
         try:
             rules = self.systemconfig.get(SystemConfigKey.TransferExcludeWords) or []
-        except Exception as e:
-            return False, f"读取屏蔽词失败：{e}"
+        except Exception:
+            return list(self._SAMPLES)
         if isinstance(rules, str):
             rules = rules.splitlines()
-        # 用「纯词 + 真实样例名」两段文本试匹配，兼容 ^加更 / 加更\.mkv$ 这类锚定写法
-        samples = ("加更", self._SAMPLE_NAME)
-        for rule in rules:
-            if not isinstance(rule, str):
-                continue
-            pattern = rule.strip()
-            if not pattern or pattern.startswith("#"):
-                continue
-            try:
-                if any(re.search(pattern, text) for text in samples):
-                    return True, ""
-            except re.error:
-                # 非法正则跳过，不影响其它规则
-                continue
-        return False, "文件整理屏蔽词里没有能匹配加更文件的规则"
+        patterns = [
+            rule.strip() for rule in rules
+            if isinstance(rule, str) and rule.strip() and not rule.strip().startswith("#")
+        ]
+        missing = []
+        for word, sample in self._SAMPLES.items():
+            # 用「纯词 + 样例名」两段文本试匹配，兼容 ^加更 这类锚定写法
+            hit = False
+            for pattern in patterns:
+                try:
+                    if any(re.search(pattern, text) for text in (word, sample)):
+                        hit = True
+                        break
+                except re.error:
+                    continue
+            if not hit:
+                missing.append(word)
+        return missing
 
     # ==================== 核心逻辑 ====================
 
@@ -533,11 +543,24 @@ class VarietyExtraOrganizer(_PluginBase):
         return os.path.splitext(filename)[1]
 
     _JIA_SUFFIX = re.compile(r'\.(?:extra|plus)(?:\.|$)', re.IGNORECASE)
+    _PREVIEW_RE = re.compile(r'抢鲜|preview', re.IGNORECASE)
+    # 插件自己生成的命名：第 01 期加更 / 第 01 集加更（旧格式）
+    _OUTPUT_RE = re.compile(r'第\s*\d+\s*[集期]\s*(加更|抢鲜)')
 
     @classmethod
-    def _is_jia(cls, filename: str) -> bool:
-        """判断是否加更文件：含「加更」且带独立的 .Extra/.Plus 后缀"""
-        return ('加更' in filename) and bool(cls._JIA_SUFFIX.search(filename))
+    def _special_kind(cls, filename: str) -> str:
+        """判断特殊文件类型：加更 / 抢鲜 / 空串（普通文件）
+
+        兼容三种命名：源文件（.Plus/.Extra）、新输出（第 NN 期加更/抢鲜）、旧输出（第 NN 集加更/抢鲜）。
+        """
+        hit = cls._OUTPUT_RE.search(filename)
+        if hit:
+            return hit.group(1)
+        if '加更' in filename and cls._JIA_SUFFIX.search(filename):
+            return "加更"
+        if cls._PREVIEW_RE.search(filename):
+            return "抢鲜"
+        return ""
 
     def _parse_title_map(self) -> Dict[str, str]:
         """解析剧名映射配置"""
@@ -598,15 +621,15 @@ class VarietyExtraOrganizer(_PluginBase):
             self._add_log("error", f"写入 NFO 失败 {nfo.name}：{e}")
             return False
 
-    @staticmethod
-    def _count_nfo(path: Path) -> int:
-        """统计目录里已有同名 NFO 的加更文件数"""
+    @classmethod
+    def _count_nfo(cls, path: Path) -> int:
+        """统计目录里已有同名 NFO 的加更/抢鲜文件数"""
         if not path.is_dir():
             return 0
         try:
             return sum(
                 1 for name in os.listdir(path)
-                if '加更' in name and not name.lower().endswith(".nfo")
+                if cls._special_kind(name) and not name.lower().endswith(".nfo")
                 and (path / name).with_suffix(".nfo").exists()
             )
         except OSError:
@@ -616,14 +639,15 @@ class VarietyExtraOrganizer(_PluginBase):
     _SIDECAR_EXT = {".nfo", ".srt", ".ass", ".ssa", ".jpg", ".jpeg", ".png", ".webp"}
 
     @classmethod
-    def _count_jia(cls, path: Path) -> int:
-        """统计目录里已存在的加更视频数（不含同名 nfo/字幕/图片）"""
+    def _count_special(cls, path: Path) -> int:
+        """统计目录里已存在的加更/抢鲜视频数（不含 nfo/字幕/图片）"""
         if not path.is_dir():
             return 0
         try:
             return sum(
                 1 for name in os.listdir(path)
-                if '加更' in name and os.path.splitext(name)[1].lower() not in cls._SIDECAR_EXT
+                if cls._special_kind(name)
+                and os.path.splitext(name)[1].lower() not in cls._SIDECAR_EXT
             )
         except OSError:
             return 0
@@ -635,7 +659,7 @@ class VarietyExtraOrganizer(_PluginBase):
         max_ep, count = 0, 0
         try:
             for name in os.listdir(path):
-                if '加更' in name:
+                if self._special_kind(name):
                     continue
                 count += 1
                 ep = self._get_ep(name)
@@ -661,6 +685,7 @@ class VarietyExtraOrganizer(_PluginBase):
             "skipped": 0,
             "errors": 0,
             "nfo": 0,
+            "renamed": 0,
             "seconds": 0.0,
             "message": "",
         }
@@ -713,15 +738,22 @@ class VarietyExtraOrganizer(_PluginBase):
                 season = int(sm.group(1))
                 stats["seasons"] += 1
 
-                # 收集加更文件
+                # 收集特殊文件：加更 / 抢鲜
                 try:
-                    files = [f for f in os.listdir(season_dir) if self._is_jia(f)]
+                    names = os.listdir(season_dir)
                 except OSError as e:
                     self._add_log("error", f"读取目录失败 {season_dir}：{e}")
                     continue
-                if not files:
+                specials = []
+                for name in names:
+                    kind = self._special_kind(name)
+                    if kind:
+                        specials.append((self._get_ep(name), kind, name))
+                if not specials:
                     continue
-                jias = sorted(files, key=self._get_ep)
+                # 按期号排序；同一期里 加更 排在 抢鲜 前面，形成「加更·抢鲜·加更·抢鲜」轮替
+                specials.sort(key=lambda x: (x[0] if x[0] > 0 else 9999,
+                                             0 if x[1] == "加更" else 1, x[2]))
 
                 # 解析剧名
                 title = self._resolve_title(season_dir.name, title_map)
@@ -771,7 +803,7 @@ class VarietyExtraOrganizer(_PluginBase):
                     )
                     if str(season_target) not in counted:
                         counted.add(str(season_target))
-                        lib_jia += self._count_jia(season_target)
+                        lib_jia += self._count_special(season_target)
                         lib_nfo += self._count_nfo(season_target)
                     continue
 
@@ -783,17 +815,40 @@ class VarietyExtraOrganizer(_PluginBase):
 
                 season_target.mkdir(parents=True, exist_ok=True)
 
-                for i, f in enumerate(jias, 1):
+                # 库里已有的加更/抢鲜，用于把旧命名（第 XX 集加更）就地改名
+                existing = {}
+                try:
+                    for name in os.listdir(season_target):
+                        kind = self._special_kind(name)
+                        ep_no = self._get_ep(name) if kind else 0
+                        if kind and ep_no:
+                            existing.setdefault((ep_no, kind), season_target / name)
+                except OSError:
+                    pass
+
+                for i, (qihao, kind, f) in enumerate(specials, 1):
                     new_ep = max_ep + i
-                    qihao = self._get_ep(f)
-                    if qihao:
-                        jihao = qihao * 2
-                    else:
-                        jihao = i * 2
-                        self._add_log("warning", f"{f} 文件名里没有 SxxEyy 期号，按第 {i} 个加更顺序编号")
+                    if not qihao:
+                        self._add_log("warning", f"{f} 文件名里没有 SxxEyy 期号，按第 {i} 个顺序编号")
+                    label_no = qihao or i
                     ext = self._get_ext(f)
-                    new_name = f"{title} - S{season:02d}E{new_ep:02d} - 第 {jihao:02d} 集加更{ext}"
+                    new_name = f"{title} - S{season:02d}E{new_ep:02d} - 第 {label_no:02d} 期{kind}{ext}"
                     dst_file = season_target / new_name
+
+                    # 旧命名（第 XX 集加更）就地改名，避免同一集出现两份
+                    legacy = existing.get((new_ep, kind))
+                    if (not dst_file.exists() and legacy is not None
+                            and legacy.name != new_name):
+                        try:
+                            legacy.rename(dst_file)
+                            old_nfo = legacy.with_suffix(".nfo")
+                            if old_nfo.exists():
+                                old_nfo.rename(dst_file.with_suffix(".nfo"))
+                            stats["renamed"] += 1
+                            self._add_log("info", f"重命名旧链接：{legacy.name} -> {new_name}")
+                        except OSError as e:
+                            self._add_log("error", f"重命名失败 {legacy.name}：{e}")
+
                     ep_title = dst_file.stem  # 与视频文件名完全一致，界面显示的就是这个名字
                     try:
                         ep_date = datetime.fromtimestamp(
@@ -819,7 +874,7 @@ class VarietyExtraOrganizer(_PluginBase):
                         self._add_log("error", f"硬链接失败 {f}：{e}")
                 if str(season_target) not in counted:
                     counted.add(str(season_target))
-                    lib_jia += self._count_jia(season_target)
+                    lib_jia += self._count_special(season_target)
                     lib_nfo += self._count_nfo(season_target)
         except Exception as e:
             stats["errors"] += 1
@@ -828,7 +883,8 @@ class VarietyExtraOrganizer(_PluginBase):
         # stats 里的 nfo_exist/in_library 在 finish() 里才赋值，这里直接用局部变量
         nfo_info = (f"，本次生成 {stats['nfo']} 个 NFO，库内覆盖 {lib_nfo}/{lib_jia}"
                     if self._write_nfo else "")
-        finish(f"扫描完成：{stats['seasons']} 个季目录，新增 {total} 个链接，跳过 {stats['skipped']} 个已存在，失败 {stats['errors']} 个{nfo_info}",
+        rename_info = f"，改名 {stats['renamed']} 个旧链接" if stats["renamed"] else ""
+        finish(f"扫描完成：{stats['seasons']} 个季目录，新增 {total} 个链接，跳过 {stats['skipped']} 个已存在，失败 {stats['errors']} 个{rename_info}{nfo_info}",
                "warning" if stats["errors"] else "info")
 
     def organize_now(self, apikey: str = None) -> dict:
