@@ -2,13 +2,14 @@
   "VarietyExtraOrganizer": {
     "name": "综艺加更整理",
     "description": "扫描综艺源目录，将无法识别的加更(Extra/Plus)与抢鲜(Preview)文件硬链接到媒体库并规范命名，使飞牛/Emby 能正常刮削。源文件全程不动。",
-    "version": "1.3.0",
+    "version": "1.3.1",
     "author": "T1677",
     "level": 1,
     "icon": "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png",
     "labels": "文件整理,综艺",
     "system_version": ">=3.0.0",
     "history": {
+      "v1.3.1": "修复新增加更不往后排、与已有文件撞集号（续排号包含已有加更/抢鲜）；历史重复集号自动按期号重排顺延",
       "v1.3.0": "支持抢鲜/Preview：同期按「加更→抢鲜」轮替，标签改为第 ZZ 期；旧命名就地改名不重复；屏蔽词检查覆盖两类",
       "v1.2.5": "屏蔽词检查用双样例匹配，锚定正则不再误报；并发标志 2 小时自愈",
       "v1.2.4": "修正 .PlusXX 误判；缺 SxxEyy 时按顺序编号避免第 00 集；同季只统计一次",

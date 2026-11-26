@@ -36,7 +36,7 @@ class VarietyExtraOrganizer(_PluginBase):
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/1314t11/MoviePilot-Plugins/main/icons/varietyextraorganizer.png"
     # 插件版本
-    plugin_version = "1.3.0"
+    plugin_version = "1.3.1"
     # 插件作者
     plugin_author = "T1677"
     # 作者主页
@@ -652,6 +652,107 @@ class VarietyExtraOrganizer(_PluginBase):
         except OSError:
             return 0
 
+    _LABEL_RE = re.compile(r'第\s*(\d+)\s*([集期])\s*(?:加更|抢鲜)')
+    _OUTPUT_STEM_RE = re.compile(
+        r'^(?P<prefix>.+?)\s*-\s*S\d+E\d+\s*-\s*第\s*(?P<no>\d+)\s*[集期]\s*(?:加更|抢鲜)$'
+    )
+
+    @classmethod
+    def _label_no(cls, filename: str) -> int:
+        """解析文件名里的标签期号
+
+        新格式「第 04 期」直接取 4；旧格式「第 08 集」是旧版的期号×2，还原成 4。
+        """
+        m = cls._LABEL_RE.search(filename)
+        if not m:
+            return 0
+        no = int(m.group(1))
+        return no if m.group(2) == '期' else max(no // 2, 1)
+
+    def _normalize_season(self, path: Path, season: int, stats: Dict[str, Any]) -> int:
+        """规范化库内已有的加更/抢鲜文件
+
+        1. 旧标签「第 NN 集加更」改为「第 NN 期加更」；
+        2. 集号重复时（历史 bug 导致），从最小重复集号起把该段按期号重排，顺延到空号。
+        返回规范化后该季特殊文件的最大集号。
+        """
+        if not path.is_dir():
+            return 0
+        items = []          # [ep, kind, label, name]
+        reserved = set()    # 正片占用的集号，重排时要避开
+        try:
+            for name in os.listdir(path):
+                if os.path.splitext(name)[1].lower() in self._SIDECAR_EXT:
+                    continue
+                kind = self._special_kind(name)
+                if kind:
+                    ep = self._get_ep(name)
+                    if ep > 0:
+                        items.append([ep, kind, self._label_no(name), name])
+                else:
+                    ep = self._get_ep(name)
+                    if ep:
+                        reserved.add(ep)
+        except OSError as e:
+            self._add_log("error", f"读取目录失败 {path}：{e}")
+            return 0
+        if not items:
+            return 0
+
+        # 找出最小的重复集号
+        seen = set()
+        dup_start = None
+        for ep in sorted(x[0] for x in items):
+            if ep in seen:
+                dup_start = ep if dup_start is None else min(dup_start, ep)
+            seen.add(ep)
+
+        if dup_start is None:
+            plan = [[x[0], x[1], x[2], x[3]] for x in items]
+        else:
+            head = [[x[0], x[1], x[2], x[3]] for x in items if x[0] < dup_start]
+            tail = sorted(
+                (x for x in items if x[0] >= dup_start),
+                key=lambda x: (x[2] or 9999, 0 if x[1] == "加更" else 1, x[3]),
+            )
+            plan = head
+            cur = dup_start
+            for _ep, kind, label, name in tail:
+                while cur in reserved or cur < dup_start:
+                    cur += 1
+                plan.append([cur, kind, label, name])
+                cur += 1
+            self._add_log(
+                "warning",
+                f"检测到集号重复，已从 E{dup_start:02d} 起按期号重排 {len(tail)} 个文件",
+            )
+
+        for ep, kind, label, name in plan:
+            stem, ext = os.path.splitext(name)
+            m = self._OUTPUT_STEM_RE.match(stem)
+            if not m:
+                continue  # 不是插件生成的命名，不动
+            no = label or int(m.group("no"))
+            new_stem = f"{m.group('prefix')} - S{season:02d}E{ep:02d} - 第 {no:02d} 期{kind}"
+            if new_stem == stem:
+                continue
+            old = path / name
+            new = path / (new_stem + ext)
+            if new.exists():
+                self._add_log("warning", f"目标已存在，跳过改名：{name} -> {new.name}")
+                continue
+            try:
+                old.rename(new)
+                old_nfo = old.with_suffix(".nfo")
+                if old_nfo.exists():
+                    old_nfo.rename(new.with_suffix(".nfo"))
+                stats["renamed"] += 1
+                self._add_log("info", f"重命名旧链接：{name} -> {new.name}")
+            except OSError as e:
+                self._add_log("error", f"重命名失败 {name}：{e}")
+
+        return max(x[0] for x in plan)
+
     def _max_ep_in_dir(self, path: Path) -> Tuple[int, int]:
         """返回目录内（跳过加更文件）的最大集号与文件数"""
         if not path.is_dir():
@@ -749,8 +850,6 @@ class VarietyExtraOrganizer(_PluginBase):
                     kind = self._special_kind(name)
                     if kind:
                         specials.append((self._get_ep(name), kind, name))
-                if not specials:
-                    continue
                 # 按期号排序；同一期里 加更 排在 抢鲜 前面，形成「加更·抢鲜·加更·抢鲜」轮替
                 specials.sort(key=lambda x: (x[0] if x[0] > 0 else 9999,
                                              0 if x[1] == "加更" else 1, x[2]))
@@ -813,42 +912,58 @@ class VarietyExtraOrganizer(_PluginBase):
                         f"{title} S{season:02d}：媒体库未解析到集号，按源目录最大集号 E{src_max} 续排",
                     )
 
+                # 源里没有待处理文件、库里也没有这一季，跳过
+                if not specials and not season_target.is_dir():
+                    continue
+
                 season_target.mkdir(parents=True, exist_ok=True)
 
-                # 库里已有的加更/抢鲜，用于把旧命名（第 XX 集加更）就地改名
-                existing = {}
+                # 先规范化库内已有文件：旧标签（第 NN 集）改为「第 NN 期」，重复集号顺延
+                norm_max = self._normalize_season(season_target, season, stats)
+                max_ep = max(src_max, dst_max, norm_max)
+
+                # 已处理过的（期号, 类型）→ 库内文件，用于跳过重复并补写 NFO
+                done: Dict[Tuple[int, str], List[Path]] = {}
                 try:
                     for name in os.listdir(season_target):
+                        if os.path.splitext(name)[1].lower() in self._SIDECAR_EXT:
+                            continue
                         kind = self._special_kind(name)
-                        ep_no = self._get_ep(name) if kind else 0
-                        if kind and ep_no:
-                            existing.setdefault((ep_no, kind), season_target / name)
+                        no = self._label_no(name) if kind else 0
+                        if kind and no:
+                            done.setdefault((no, kind), []).append(season_target / name)
                 except OSError:
                     pass
 
-                for i, (qihao, kind, f) in enumerate(specials, 1):
-                    new_ep = max_ep + i
-                    if not qihao:
-                        self._add_log("warning", f"{f} 文件名里没有 SxxEyy 期号，按第 {i} 个顺序编号")
-                    label_no = qihao or i
-                    ext = self._get_ext(f)
-                    new_name = f"{title} - S{season:02d}E{new_ep:02d} - 第 {label_no:02d} 期{kind}{ext}"
-                    dst_file = season_target / new_name
-
-                    # 旧命名（第 XX 集加更）就地改名，避免同一集出现两份
-                    legacy = existing.get((new_ep, kind))
-                    if (not dst_file.exists() and legacy is not None
-                            and legacy.name != new_name):
+                next_ep = max_ep
+                for qihao, kind, f in specials:
+                    # 这一期的加更/抢鲜已在库里 → 只补 NFO，不再新建
+                    targets = done.get((qihao, kind)) or []
+                    if targets:
+                        stats["skipped"] += 1
+                        target = targets.pop(0)
+                        ep_of = self._get_ep(target.name) or next_ep
                         try:
-                            legacy.rename(dst_file)
-                            old_nfo = legacy.with_suffix(".nfo")
-                            if old_nfo.exists():
-                                old_nfo.rename(dst_file.with_suffix(".nfo"))
-                            stats["renamed"] += 1
-                            self._add_log("info", f"重命名旧链接：{legacy.name} -> {new_name}")
-                        except OSError as e:
-                            self._add_log("error", f"重命名失败 {legacy.name}：{e}")
+                            ep_date = datetime.fromtimestamp(
+                                (season_dir / f).stat().st_mtime).strftime("%Y-%m-%d")
+                        except OSError:
+                            ep_date = datetime.now().strftime("%Y-%m-%d")
+                        if self._write_episode_nfo(
+                                target, title, season, ep_of, target.stem,
+                                show_year or ep_date[:4], ep_date):
+                            stats["nfo"] += 1
+                        continue
 
+                    next_ep += 1
+                    label_no = qihao or (next_ep - max_ep)
+                    if not qihao:
+                        self._add_log(
+                            "warning",
+                            f"{f} 文件名里没有 SxxEyy 期号，按第 {label_no} 个顺序编号",
+                        )
+                    ext = self._get_ext(f)
+                    new_name = f"{title} - S{season:02d}E{next_ep:02d} - 第 {label_no:02d} 期{kind}{ext}"
+                    dst_file = season_target / new_name
                     ep_title = dst_file.stem  # 与视频文件名完全一致，界面显示的就是这个名字
                     try:
                         ep_date = datetime.fromtimestamp(
@@ -859,7 +974,7 @@ class VarietyExtraOrganizer(_PluginBase):
                     if dst_file.exists():
                         stats["skipped"] += 1
                         if self._write_episode_nfo(
-                                dst_file, title, season, new_ep, ep_title, ep_year, ep_date):
+                                dst_file, title, season, next_ep, ep_title, ep_year, ep_date):
                             stats["nfo"] += 1
                         continue
                     try:
@@ -867,7 +982,7 @@ class VarietyExtraOrganizer(_PluginBase):
                         total += 1
                         self._add_log("info", f"{f} -> {new_name}")
                         if self._write_episode_nfo(
-                                dst_file, title, season, new_ep, ep_title, ep_year, ep_date):
+                                dst_file, title, season, next_ep, ep_title, ep_year, ep_date):
                             stats["nfo"] += 1
                     except Exception as e:
                         stats["errors"] += 1
